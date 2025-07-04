@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Journey Tracking Form</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        background: #f5f5f5;
+        padding: 2rem;
+      }
+      form {
+        background: white;
+        padding: 2rem;
+        border-radius: 10px;
+        max-width: 500px;
+        margin: auto;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+      }
+      input,
+      button {
+        width: 100%;
+        padding: 0.75rem;
+        margin-bottom: 1rem;
+        border-radius: 5px;
+        border: 1px solid #ddd;
+      }
+      button {
+        background-color: #4f46e5;
+        color: white;
+        border: none;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <form id="leadForm">
+      <h2>Contact Us</h2>
+      <input type="text" name="name" placeholder="Your Name" required />
+      <input type="email" name="email" placeholder="Your Email" required />
+      <input type="tel" name="phone" placeholder="Your Phone" />
+      <button type="submit">Submit Form</button>
+    </form>
+
+    <script>
+      const TRACKING_KEY = "user_journey_tracking";
+      const formStartTime = Date.now();
+
+      class JourneyTracker {
+        constructor() {
+          this.initializeTracking();
+          this.trackPageView();
+          this.setupScrollTracking();
+        }
+
+        initializeTracking() {
+          let journey = this.getStoredJourney();
+
+          if (!journey.session?.sessionId) {
+            journey = this.createNewSession();
+          } else {
+            journey.pages.currentPage = this.getCurrentPageData();
+            journey.engagement.pageViews++;
+          }
+
+          this.saveJourney(journey);
+        }
+
+        createNewSession() {
+          const referrerData = this.analyzeReferrer();
+          const landingPageData = this.getLandingPageData();
+          const currentPageData = this.getCurrentPageData();
+
+          return {
+            session: {
+              sessionId: this.generateSessionId(),
+              startTime: Date.now(),
+              userAgent: navigator.userAgent,
+              language: navigator.language,
+              timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            },
+            attribution: {
+              ...referrerData,
+            },
+            pages: {
+              referrerPage: referrerData.referrerUrl,
+              landingPage: landingPageData,
+              currentPage: currentPageData,
+              pageSequence: [currentPageData.url],
+            },
+            technical: {
+              device: this.getDeviceType(),
+              browser: this.getBrowser(),
+              os: this.getOS(),
+              screenResolution: `${screen.width}x${screen.height}`,
+              viewportSize: `${window.innerWidth}x${window.innerHeight}`,
+              connectionType: navigator.connection?.effectiveType || "unknown",
+            },
+            engagement: {
+              pageViews: 1,
+              maxScrollDepth: 0,
+              timeOnSite: 0,
+              timeOnCurrentPage: 0,
+              formInteractions: 0,
+              formStartTime: null,
+              formCompletionTime: null,
+            },
+          };
+        }
+
+        analyzeReferrer() {
+          const currentUrl = new URL(window.location.href);
+          const referrer = document.referrer;
+          const utmParams = {
+            utmSource: currentUrl.searchParams.get("utm_source") || "",
+            utmMedium: currentUrl.searchParams.get("utm_medium") || "",
+            utmCampaign: currentUrl.searchParams.get("utm_campaign") || "",
+            utmTerm: currentUrl.searchParams.get("utm_term") || "",
+            utmContent: currentUrl.searchParams.get("utm_content") || "",
+          };
+          const ppcIndicators = [
+            "gclid=",
+            "fbclid=",
+            "msclkid=",
+            "ttclid=",
+            "twclid=",
+            "utm_medium=cpc",
+            "utm_medium=ppc",
+            "utm_medium=paid",
+          ];
+          const isPPC = ppcIndicators.some((i) =>
+            window.location.href.toLowerCase().includes(i)
+          );
+
+          if (isPPC) {
+            return {
+              ...utmParams,
+              referrerUrl: referrer,
+              source: utmParams.utmSource || "paid_search",
+              medium: "paid",
+              campaign: utmParams.utmCampaign || "unknown",
+              platform: this.getPPCPlatform(currentUrl, referrer),
+              category: "PPC",
+            };
+          }
+
+          const social = this.getSocialPlatform(referrer);
+          if (social) {
+            return {
+              ...utmParams,
+              referrerUrl: referrer,
+              source: social.toLowerCase(),
+              medium: "social",
+              campaign: utmParams.utmCampaign || "organic_social",
+              platform: social,
+              category: "Social Media",
+            };
+          }
+
+          const engine = this.getSearchEngine(referrer);
+          if (engine) {
+            return {
+              ...utmParams,
+              referrerUrl: referrer,
+              source: engine.toLowerCase(),
+              medium: "organic",
+              campaign: "seo",
+              platform: engine,
+              category: "SEO",
+            };
+          }
+
+          if (referrer && !this.isOwnDomain(referrer)) {
+            return {
+              ...utmParams,
+              referrerUrl: referrer,
+              source: this.getDomain(referrer),
+              medium: "referral",
+              campaign: "referral",
+              platform: this.getDomain(referrer),
+              category: "Referral",
+            };
+          }
+
+          return {
+            ...utmParams,
+            referrerUrl: referrer || "direct",
+            source: "direct",
+            medium: "direct",
+            campaign: "direct",
+            platform: "direct",
+            category: "Direct",
+          };
+        }
+
+        getLandingPageData() {
+          return {
+            url: window.location.href,
+            path: window.location.pathname,
+            title: document.title,
+            timestamp: new Date().toISOString(),
+          };
+        }
+
+        getCurrentPageData() {
+          return this.getLandingPageData();
+        }
+
+        getPPCPlatform(url, referrer) {
+          const u = url.toString().toLowerCase();
+          const r = referrer.toLowerCase();
+          if (u.includes("gclid") || r.includes("google")) return "Google Ads";
+          if (u.includes("fbclid") || r.includes("facebook"))
+            return "Facebook Ads";
+          if (u.includes("msclkid") || r.includes("bing"))
+            return "Microsoft Ads";
+          if (u.includes("ttclid") || r.includes("tiktok")) return "TikTok Ads";
+          if (u.includes("twclid") || r.includes("twitter"))
+            return "Twitter Ads";
+          return "Paid Search";
+        }
+
+        getSocialPlatform(referrer) {
+          if (!referrer) return null;
+          const platforms = {
+            "facebook.com": "Facebook",
+            "instagram.com": "Instagram",
+            "linkedin.com": "LinkedIn",
+            "tiktok.com": "TikTok",
+            "twitter.com": "Twitter",
+            "youtube.com": "YouTube",
+          };
+          return Object.entries(platforms).find(([k]) =>
+            referrer.includes(k)
+          )?.[1];
+        }
+
+        getSearchEngine(referrer) {
+          if (!referrer) return null;
+          const engines = {
+            "google.com": "Google",
+            "bing.com": "Bing",
+            "yahoo.com": "Yahoo",
+            "duckduckgo.com": "DuckDuckGo",
+          };
+          return Object.entries(engines).find(([k]) =>
+            referrer.includes(k)
+          )?.[1];
+        }
+
+        getDeviceType() {
+          const ua = navigator.userAgent;
+          if (/mobile/i.test(ua)) return "Mobile";
+          if (/tablet/i.test(ua)) return "Tablet";
+          return "Desktop";
+        }
+
+        getBrowser() {
+          const ua = navigator.userAgent;
+          if (ua.includes("Chrome") && !ua.includes("Edg")) return "Chrome";
+          if (ua.includes("Firefox")) return "Firefox";
+          if (ua.includes("Safari") && !ua.includes("Chrome")) return "Safari";
+          if (ua.includes("Edg")) return "Edge";
+          return "Other";
+        }
+
+        getOS() {
+          const ua = navigator.userAgent;
+          if (ua.includes("Windows")) return "Windows";
+          if (ua.includes("Mac")) return "macOS";
+          if (ua.includes("Linux")) return "Linux";
+          if (ua.includes("Android")) return "Android";
+          if (ua.includes("iOS")) return "iOS";
+          return "Other";
+        }
+
+        getDomain(url) {
+          try {
+            return new URL(url).hostname.replace("www.", "");
+          } catch {
+            return "unknown";
+          }
+        }
+
+        isOwnDomain(url) {
+          try {
+            return new URL(url).hostname === window.location.hostname;
+          } catch {
+            return false;
+          }
+        }
+
+        generateSessionId() {
+          return (
+            "session_" +
+            Math.random().toString(36).substr(2, 9) +
+            "_" +
+            Date.now()
+          );
+        }
+
+        trackPageView() {
+          let journey = this.getStoredJourney();
+          const currentUrl = window.location.href;
+          journey.pages.pageSequence = journey.pages.pageSequence || [];
+          if (!journey.pages.pageSequence.includes(currentUrl)) {
+            journey.pages.pageSequence.push(currentUrl);
+          }
+          this.saveJourney(journey);
+        }
+
+        setupScrollTracking() {
+          let maxScroll = 0;
+          window.addEventListener("scroll", () => {
+            const scrollTop = window.scrollY;
+            const docHeight = document.body.scrollHeight - window.innerHeight;
+            const scrolled = Math.min((scrollTop / docHeight) * 100, 100);
+            if (scrolled > maxScroll) {
+              maxScroll = Math.round(scrolled);
+              let journey = this.getStoredJourney();
+              journey.engagement.maxScrollDepth = maxScroll;
+              this.saveJourney(journey);
+            }
+          });
+        }
+
+        trackFormStart() {
+          let journey = this.getStoredJourney();
+          journey.engagement.formStartTime = Date.now();
+          journey.engagement.formInteractions++;
+          this.saveJourney(journey);
+        }
+
+        generateLeadData(formData) {
+          const journey = this.getStoredJourney();
+          const now = Date.now();
+          journey.engagement.formCompletionTime = now;
+          journey.engagement.timeOnSite = now - journey.session.startTime;
+          journey.engagement.timeOnCurrentPage = now - formStartTime;
+
+          return {
+            lead: {
+              name: formData.name,
+              email: formData.email,
+              phone: formData.phone || "",
+              submittedAt: new Date().toISOString(),
+            },
+            attribution: journey.attribution,
+            journey: {
+              referrerPage: journey.pages.referrerPage,
+              landingPage: journey.pages.landingPage,
+              formPage: journey.pages.currentPage,
+              pageSequence: journey.pages.pageSequence,
+              totalPages: journey.pages.pageSequence.length,
+            },
+            engagement: {
+              timeOnSite: Math.round(journey.engagement.timeOnSite / 1000),
+              timeOnFormPage: Math.round(
+                journey.engagement.timeOnCurrentPage / 1000
+              ),
+              formFillTime: journey.engagement.formStartTime
+                ? Math.round((now - journey.engagement.formStartTime) / 1000)
+                : 0,
+              scrollDepth: journey.engagement.maxScrollDepth,
+              pageViews: journey.engagement.pageViews,
+              interactions: journey.engagement.formInteractions,
+            },
+            technical: journey.technical,
+            session: {
+              sessionId: journey.session.sessionId,
+              sessionDuration: Math.round(
+                (now - journey.session.startTime) / 1000
+              ),
+              timezone: journey.session.timezone,
+              language: journey.session.language,
+            },
+          };
+        }
+
+        getStoredJourney() {
+          const stored = localStorage.getItem(TRACKING_KEY);
+          return stored
+            ? JSON.parse(stored)
+            : {
+                session: {},
+                pages: {},
+                attribution: {},
+                technical: {},
+                engagement: {},
+              };
+        }
+
+        saveJourney(journey) {
+          localStorage.setItem(TRACKING_KEY, JSON.stringify(journey));
+        }
+
+        clearJourney() {
+          localStorage.removeItem(TRACKING_KEY);
+        }
+      }
+
+      const tracker = new JourneyTracker();
+
+      document.querySelectorAll("#leadForm input").forEach((input) => {
+        input.addEventListener("focus", () => {
+          tracker.trackFormStart();
+        });
+      });
+
+      document
+        .getElementById("leadForm")
+        .addEventListener("submit", function (e) {
+          e.preventDefault();
+          const formData = {
+            name: this.name.value,
+            email: this.email.value,
+            phone: this.phone.value,
+          };
+
+          const leadData = tracker.generateLeadData(formData);
+          console.log(leadData);
+          alert("Done");
+          tracker.clearJourney();
+        });
+    </script>
+  </body>
+</html>
