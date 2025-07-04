@@ -4,7 +4,7 @@
 
   function getJourney() {
     const stored = localStorage.getItem(TRACKING_KEY);
-    return stored ? JSON.parse(stored) : createNewSession();
+    return stored ? JSON.parse(stored) : null;
   }
 
   function saveJourney(journey) {
@@ -14,6 +14,14 @@
   function createNewSession() {
     const referrer = document.referrer;
     console.log("📌 Raw Referrer:", referrer);
+
+    // Check for WhatsApp-specific indicators
+    const userAgent = navigator.userAgent;
+    const isWhatsAppBrowser =
+      userAgent.includes("WhatsApp") || userAgent.includes("WABR");
+
+    console.log("📱 User Agent:", userAgent);
+    console.log("🔍 WhatsApp Browser:", isWhatsAppBrowser);
 
     const currentUrl = new URL(window.location.href);
     const utm = {
@@ -33,13 +41,38 @@
     };
 
     const getSource = () => {
-      if (!referrer || referrer === "") return "direct";
+      if (!referrer || referrer === "") {
+        // Check if opened from WhatsApp app even without referrer
+        if (isWhatsAppBrowser) return "whatsapp";
+        return "direct";
+      }
+
+      // Enhanced WhatsApp detection
+      if (
+        referrer.includes("whatsapp") ||
+        referrer.includes("wa.me") ||
+        referrer.includes("chat.whatsapp.com") ||
+        referrer.includes("web.whatsapp.com") ||
+        referrer.includes("api.whatsapp.com") ||
+        isWhatsAppBrowser
+      ) {
+        return "whatsapp";
+      }
+
+      // Other social platforms
       if (referrer.includes("google")) return "google";
-      if (referrer.includes("facebook")) return "facebook";
+      if (referrer.includes("facebook") || referrer.includes("fb.me"))
+        return "facebook";
       if (referrer.includes("instagram")) return "instagram";
-      if (referrer.includes("linkedin")) return "linkedin";
-      if (referrer.includes("whatsapp")) return "whatsapp";
+      if (referrer.includes("linkedin") || referrer.includes("lnkd.in"))
+        return "linkedin";
+      if (referrer.includes("twitter") || referrer.includes("t.co"))
+        return "twitter";
+      if (referrer.includes("telegram")) return "telegram";
       if (referrer.includes("bing")) return "bing";
+      if (referrer.includes("yahoo")) return "yahoo";
+      if (referrer.includes("duckduckgo")) return "duckduckgo";
+
       return getDomain(referrer);
     };
 
@@ -108,29 +141,60 @@
     return journey;
   }
 
+  // Check if this is a new session or existing one
   let journey = getJourney();
 
-  journey.pages.currentPage = {
-    url: location.href,
-    path: location.pathname,
-    title: document.title,
-    timestamp: new Date().toISOString(),
-  };
+  // Only create new session if:
+  // 1. No existing journey OR
+  // 2. Referrer exists and is different from current domain (new referral source)
+  const currentDomain = window.location.hostname.replace("www.", "");
+  const referrerDomain = document.referrer
+    ? new URL(document.referrer).hostname.replace("www.", "")
+    : null;
 
-  journey.pages.pageSequence = journey.pages.pageSequence || [];
-  if (!journey.pages.pageSequence.includes(location.href)) {
-    journey.pages.pageSequence.push(location.href);
+  const isNewReferralSource =
+    document.referrer &&
+    referrerDomain &&
+    referrerDomain !== currentDomain &&
+    journey &&
+    journey.attribution.platform !== referrerDomain;
+
+  if (!journey || isNewReferralSource) {
+    console.log(
+      "🔄 Creating new session:",
+      isNewReferralSource ? "New referral source" : "No existing journey"
+    );
+    journey = createNewSession();
+  } else {
+    console.log("📋 Continuing existing session");
+
+    // Update current page info for existing session
+    journey.pages.currentPage = {
+      url: location.href,
+      path: location.pathname,
+      title: document.title,
+      timestamp: new Date().toISOString(),
+    };
+
+    // Add to page sequence if not already there
+    journey.pages.pageSequence = journey.pages.pageSequence || [];
+    if (!journey.pages.pageSequence.includes(location.href)) {
+      journey.pages.pageSequence.push(location.href);
+    }
+
+    // Increment page views
+    journey.engagement.pageViews++;
+
+    saveJourney(journey);
   }
 
-  journey.engagement.pageViews++;
-
-  saveJourney(journey);
-
-  let maxScroll = 0;
+  // Scroll tracking
+  let maxScroll = journey.engagement.maxScrollDepth || 0;
   window.addEventListener("scroll", () => {
     const scrollTop = window.scrollY;
     const docHeight = document.body.scrollHeight - window.innerHeight;
-    const scrolled = Math.round((scrollTop / docHeight) * 100);
+    const scrolled =
+      docHeight > 0 ? Math.round((scrollTop / docHeight) * 100) : 0;
     if (scrolled > maxScroll) {
       maxScroll = scrolled;
       journey.engagement.maxScrollDepth = maxScroll;
@@ -138,11 +202,14 @@
     }
   });
 
+  // Form tracking
   document.querySelectorAll("form").forEach((form) => {
+    const formId = form.id || `form_${Date.now()}`;
+
     form.addEventListener("focusin", () => {
       journey.engagement.formInteractions++;
-      if (!formStartTimes[form.id]) {
-        formStartTimes[form.id] = Date.now();
+      if (!formStartTimes[formId]) {
+        formStartTimes[formId] = Date.now();
       }
       saveJourney(journey);
     });
@@ -172,11 +239,11 @@
         },
         engagement: {
           timeOnSite: Math.round((now - journey.session.startTime) / 1000),
-          timeOnFormPage: formStartTimes[form.id]
-            ? Math.round((now - formStartTimes[form.id]) / 1000)
+          timeOnFormPage: formStartTimes[formId]
+            ? Math.round((now - formStartTimes[formId]) / 1000)
             : 0,
-          formFillTime: formStartTimes[form.id]
-            ? Math.round((now - formStartTimes[form.id]) / 1000)
+          formFillTime: formStartTimes[formId]
+            ? Math.round((now - formStartTimes[formId]) / 1000)
             : 0,
           scrollDepth: journey.engagement.maxScrollDepth,
           pageViews: journey.engagement.pageViews,
@@ -184,16 +251,23 @@
         },
       };
 
+      // Collect form data
       for (const [key, value] of fields.entries()) {
         data.lead[key] = value;
       }
 
-      console.log("🎯 Lead Journey Data", data);
+      console.log("🎯 Lead Journey Data (BEFORE clearing storage):", data);
 
+      // Clear storage AFTER logging the data
       localStorage.removeItem(TRACKING_KEY);
 
+      // Reset form start times
+      delete formStartTimes[formId];
+
+      // Create new session for next interaction
       journey = createNewSession();
 
+      // Reset form
       form.reset();
     });
   });
