@@ -4,15 +4,7 @@
 
   function getJourney() {
     const stored = localStorage.getItem(TRACKING_KEY);
-    return stored
-      ? JSON.parse(stored)
-      : {
-          session: {},
-          attribution: {},
-          pages: { pageSequence: [] },
-          technical: {},
-          engagement: {},
-        };
+    return stored ? JSON.parse(stored) : createNewSession();
   }
 
   function saveJourney(journey) {
@@ -20,8 +12,9 @@
   }
 
   function createNewSession() {
-    const journey = {};
     const referrer = document.referrer;
+    console.log("📌 Raw Referrer:", referrer);
+
     const currentUrl = new URL(window.location.href);
     const utm = {
       utmSource: currentUrl.searchParams.get("utm_source") || "",
@@ -39,112 +32,100 @@
       }
     };
 
-    const isOwnDomain = (url) => {
-      try {
-        return new URL(url).hostname === location.hostname;
-      } catch {
-        return false;
-      }
-    };
-
     const getSource = () => {
       if (!referrer || referrer === "") return "direct";
       if (referrer.includes("google")) return "google";
       if (referrer.includes("facebook")) return "facebook";
       if (referrer.includes("instagram")) return "instagram";
       if (referrer.includes("linkedin")) return "linkedin";
+      if (referrer.includes("whatsapp")) return "whatsapp";
       if (referrer.includes("bing")) return "bing";
       return getDomain(referrer);
     };
 
-    journey.session = {
-      sessionId:
-        "sess_" + Date.now() + "_" + Math.random().toString(36).slice(2),
-      startTime: Date.now(),
-      userAgent: navigator.userAgent,
-      language: navigator.language,
-      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    };
-
-    journey.attribution = {
-      ...utm,
-      referrerUrl: referrer || "direct",
-      source: utm.utmSource || getSource(),
-      medium: utm.utmMedium || (referrer ? "referral" : "direct"),
-      campaign: utm.utmCampaign || "default",
-      platform: referrer ? getDomain(referrer) : "direct",
-      category: utm.utmMedium ? "UTM" : referrer ? "Referral" : "Direct",
-    };
-
-    journey.pages = {
-      referrerPage: referrer || "direct",
-      landingPage: {
-        url: window.location.href,
-        path: location.pathname,
-        title: document.title,
-        timestamp: new Date().toISOString(),
+    const journey = {
+      session: {
+        sessionId:
+          "sess_" + Date.now() + "_" + Math.random().toString(36).slice(2),
+        startTime: Date.now(),
+        userAgent: navigator.userAgent,
+        language: navigator.language,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       },
-      currentPage: {
-        url: window.location.href,
-        path: location.pathname,
-        title: document.title,
-        timestamp: new Date().toISOString(),
+      attribution: {
+        ...utm,
+        referrerUrl: referrer || "direct",
+        source: utm.utmSource || getSource(),
+        medium: utm.utmMedium || (referrer ? "referral" : "direct"),
+        campaign: utm.utmCampaign || "default",
+        platform: referrer ? getDomain(referrer) : "direct",
+        category: utm.utmMedium ? "UTM" : referrer ? "Referral" : "Direct",
       },
-      pageSequence: [window.location.href],
+      pages: {
+        referrerPage: referrer || "direct",
+        landingPage: {
+          url: window.location.href,
+          path: location.pathname,
+          title: document.title,
+          timestamp: new Date().toISOString(),
+        },
+        currentPage: {
+          url: window.location.href,
+          path: location.pathname,
+          title: document.title,
+          timestamp: new Date().toISOString(),
+        },
+        pageSequence: [window.location.href],
+      },
+      technical: {
+        device: /mobile/i.test(navigator.userAgent) ? "Mobile" : "Desktop",
+        browser: navigator.userAgent.includes("Chrome")
+          ? "Chrome"
+          : navigator.userAgent.includes("Firefox")
+          ? "Firefox"
+          : navigator.userAgent.includes("Safari")
+          ? "Safari"
+          : "Other",
+        os: navigator.userAgent.includes("Windows")
+          ? "Windows"
+          : navigator.userAgent.includes("Mac")
+          ? "macOS"
+          : navigator.userAgent.includes("Linux")
+          ? "Linux"
+          : "Other",
+        screenResolution: `${screen.width}x${screen.height}`,
+        viewportSize: `${window.innerWidth}x${window.innerHeight}`,
+        connectionType: navigator.connection?.effectiveType || "unknown",
+      },
+      engagement: {
+        pageViews: 1,
+        maxScrollDepth: 0,
+        formInteractions: 0,
+      },
     };
 
-    journey.technical = {
-      device: /mobile/i.test(navigator.userAgent) ? "Mobile" : "Desktop",
-      browser: navigator.userAgent.includes("Chrome")
-        ? "Chrome"
-        : navigator.userAgent.includes("Firefox")
-        ? "Firefox"
-        : navigator.userAgent.includes("Safari")
-        ? "Safari"
-        : "Other",
-      os: navigator.userAgent.includes("Windows")
-        ? "Windows"
-        : navigator.userAgent.includes("Mac")
-        ? "macOS"
-        : navigator.userAgent.includes("Linux")
-        ? "Linux"
-        : "Other",
-      screenResolution: `${screen.width}x${screen.height}`,
-      viewportSize: `${window.innerWidth}x${window.innerHeight}`,
-      connectionType: navigator.connection?.effectiveType || "unknown",
-    };
-
-    journey.engagement = {
-      pageViews: 1,
-      maxScrollDepth: 0,
-      formInteractions: 0,
-    };
-
+    saveJourney(journey);
     return journey;
   }
 
-  // Start tracking
   let journey = getJourney();
 
-  if (!journey.session?.sessionId) {
-    journey = createNewSession();
-  } else {
-    journey.pages.currentPage = {
-      url: location.href,
-      path: location.pathname,
-      title: document.title,
-      timestamp: new Date().toISOString(),
-    };
-    journey.pages.pageSequence = journey.pages.pageSequence || [];
-    if (!journey.pages.pageSequence.includes(location.href)) {
-      journey.pages.pageSequence.push(location.href);
-    }
-    journey.engagement.pageViews++;
+  journey.pages.currentPage = {
+    url: location.href,
+    path: location.pathname,
+    title: document.title,
+    timestamp: new Date().toISOString(),
+  };
+
+  journey.pages.pageSequence = journey.pages.pageSequence || [];
+  if (!journey.pages.pageSequence.includes(location.href)) {
+    journey.pages.pageSequence.push(location.href);
   }
+
+  journey.engagement.pageViews++;
 
   saveJourney(journey);
 
-  // Scroll tracking
   let maxScroll = 0;
   window.addEventListener("scroll", () => {
     const scrollTop = window.scrollY;
@@ -157,7 +138,6 @@
     }
   });
 
-  // Track form interaction globally
   document.querySelectorAll("form").forEach((form) => {
     form.addEventListener("focusin", () => {
       journey.engagement.formInteractions++;
@@ -169,6 +149,7 @@
 
     form.addEventListener("submit", (e) => {
       e.preventDefault();
+
       const fields = new FormData(form);
       const now = Date.now();
 
@@ -208,9 +189,12 @@
       }
 
       console.log("🎯 Lead Journey Data", data);
-      // TODO: Send data to backend via fetch(), webhook, or other logic
 
       localStorage.removeItem(TRACKING_KEY);
+
+      journey = createNewSession();
+
+      form.reset();
     });
   });
 })();
